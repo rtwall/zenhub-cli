@@ -33,18 +33,23 @@ while (( "$#" )); do
     -Z*) zhtoken=${2} ; shift ; shift ;;
     --)
       case "${cmd}" in
-        board|events|issue) test -z "${project}" && project=$(placehold-project) ;;
+        board|events|issue|move) test -z "${project}" && project=$(placehold-project) ;;
       esac
       shift
     ;;
     *)
       case "${cmd}" in
-        events|issue) test -n "${1}" && test -n "${project}" && issue=${1} ;;
+        move)
+          test -n "${1}" && test -n "${pipeline}" && test -z "${position}" && position=${1}
+          test -n "${1}" && test -n "${issue}" && test -z "${pipeline}" && pipeline=${1} ;;
       esac
       case "${cmd}" in
-        board|events|issue) test -n "${1}" && test -z "${project}" && project=${1} ;;
+        events|issue|move) test -n "${1}" && test -n "${project}" && test -z "${issue}" && issue=${1} ;;
       esac
-      shift
+      case "${cmd}" in
+        board|events|issue|move) test -n "${1}" && test -z "${project}" && project=${1} ;;
+      esac
+     shift
     ;;
   esac
 done
@@ -64,15 +69,22 @@ case "${cmd}" in
   ;;
 esac
 case "${cmd}" in
-  board|events|issue)
+  board|events|issue|move)
     test -z "${project}" && read -e -p 'Enter project slug (e.g. rockymadden/zenhub-cli): ' project
   ;;
 esac
 case "${cmd}" in
-  events|issue)
+  events|issue|move)
     test -z "${issue}" && read -e -p 'Enter issue (e.g. 123): ' issue
   ;;
 esac
+case "${cmd}" in
+  move)
+    test -z "${pipeline}" && read -e -p 'Enter pipeline (e.g New Issues): ' pipeline
+    test -z "${position}" && read -e -p 'Enter position (e.g top, bottom, 1, 2): ' position
+  ;;
+esac
+
 
 ## Command utility functions ######################################################################
 function jqify() {
@@ -92,6 +104,16 @@ function jqify() {
     *) return 1 ;;
   esac
 }
+
+function lookup-pipeline-id() {
+  local pid=${1}
+  local pipeline=${2}
+  local filter=".pipelines | .[] | select(.name==\"${pipeline}\") | .id"
+  local compact=
+  local monochrome=
+  jqify GET "https://api.zenhub.io/p1/repositories/${pid}/board"
+}
+
 
 function lookup-project-id() {
   curl -f -s -H "Authorization: token ${ghtoken}" "https://api.github.com/repos/${1}" | \
@@ -119,6 +141,7 @@ function help() {
   echo "  ${bin} init [--compact|-c] [--filter|-f <filter>] [--github-token|-G <token>] [--monochrome|-m]"
   echo '    [--zenhub-token|-Z <token>]'
   echo "  ${bin} issue <project> <issue> [--compact|-c] [--filter|-f <filter>] [--monochrome|-m]"
+  echo "  ${bin} move <project> <issue> <pipeline> <position>"
   echo
   echo 'Configuration Commands:'
   echo '  init    Initialize'
@@ -127,6 +150,7 @@ function help() {
   echo '  board     Project board pipelines plus the issues contained within each pipeline'
   echo '  events    Project issue events, sorted by most recent'
   echo '  issue     Project issue time estimate, pipeline, and +1s'
+  echo '  move      Project issue state transitions'
 }
 
 function init() {
@@ -144,6 +168,22 @@ function issue() {
   jqify GET "https://api.zenhub.io/p1/repositories/${pid}/issues/${issue}"
 }
 
+function move() {
+  local project_id=$(lookup-project-id ${project})
+  local pipeline_id=$(lookup-pipeline-id ${project_id} "${pipeline}")
+  local payload=$(jq -nc --arg pipeline_id "$pipeline_id" --arg position ${position} '
+{
+  pipeline_id: $pipeline_id,
+  position: $position,
+}')
+
+  curl -f -s \
+       -X POST  "https://api.zenhub.io/p1/repositories/${project_id}/issues/${issue}/moves" \
+       -H "Content-Type: application/json" \
+       -H "X-Authentication-Token: ${zhtoken}" \
+       -d "${payload}" 
+} 
+
 function version() {
   echo 'v0.1.0'
 }
@@ -152,6 +192,6 @@ function version() {
 case "${cmd}" in
   --help|-h) help ; exit 0 ;;
   --version|-v) version ; exit 0 ;;
-  board|events|init|issue) "${cmd}" ; exit "$?" ;;
+  board|events|init|issue|move) "${cmd}" ; exit "$?" ;;
   *) help ; exit 1 ;;
 esac
