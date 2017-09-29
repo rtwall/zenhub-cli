@@ -2,7 +2,7 @@
 
 load suite
 
-@test 'move should should exit 0 and change the issue state' {
+@test 'move should exit 0 and change the issue state' {
   # ensure we avoid false positives by moving away from the initial state
   run build/bin/zenhub issue rockymadden/zenhub-cli 1 --filter='.pipeline | .name'
   [ "${status}" -eq 0 ]
